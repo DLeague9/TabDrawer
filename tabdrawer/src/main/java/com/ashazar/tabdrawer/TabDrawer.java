@@ -1,14 +1,18 @@
 package com.ashazar.tabdrawer;
 
+import android.animation.TimeInterpolator;
 import android.app.Activity;
 import android.content.Context;
 import android.graphics.Point;
 import android.graphics.Typeface;
 import android.support.annotation.NonNull;
+import android.support.v4.view.PagerAdapter;
+import android.support.v4.view.ViewPager;
 import android.util.TypedValue;
 import android.view.Display;
 import android.view.Gravity;
 import android.view.LayoutInflater;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.AdapterView;
@@ -88,6 +92,7 @@ public class TabDrawer implements View.OnClickListener, GridView.OnItemClickList
     private static int previousSelectedTabItemPos = -1;
     private static int previousSelectedTabWithListPos = -1;
 
+    private DrawerViewPager drawerViewPager = null;
 
     /**
      * TabDrawer's status
@@ -169,7 +174,7 @@ public class TabDrawer implements View.OnClickListener, GridView.OnItemClickList
         }
 
         refreshTabBar(currentSelectedTabPos);
-        refreshTabLists(currentSelectedTabPos, currentSelectedTabItemPos);
+        //refreshTabLists(currentSelectedTabPos, currentSelectedTabItemPos);
 
         tabDrawerLayout.setOnClickListener(this);
     }
@@ -296,18 +301,49 @@ public class TabDrawer implements View.OnClickListener, GridView.OnItemClickList
 
         if (tabBarPositionTopOrBottom()) {
             tabListContainer.setOrientation(LinearLayout.HORIZONTAL);
-            tabListContainer.setLayoutParams(new LinearLayout.LayoutParams(getScreenWidth() * tabCount, tabListContainerSize));
+            tabListContainer.setLayoutParams(new LinearLayout.LayoutParams(getScreenWidth(), tabListContainerSize));
         }
         else {
             tabListContainer.setOrientation(LinearLayout.VERTICAL);
-            tabListContainer.setLayoutParams(new LinearLayout.LayoutParams(tabListContainerSize, getScreenHeight() * tabCount));
+            tabListContainer.setLayoutParams(new LinearLayout.LayoutParams(tabListContainerSize, getScreenHeight()));
         }
 
-        for (int i = 0; i < tabCount; i++) {
-            RelativeLayout layout = prepareItemListContainerView(i);
-            tabListContainer.addView(layout);
-        }
+        drawerViewPager = new DrawerViewPager(context) {
+            @Override
+            protected void onPageScrolled(int position, float offset, int offsetPixels) {
+                super.onPageScrolled(position, offset, offsetPixels);
+                refreshTabBar(position);
+            }
+        };
+        drawerViewPager.setScrollDirection(tabBarPositionTopOrBottom());
 
+        drawerViewPager.setAdapter(new PagerAdapter() {
+            @Override
+            public int getCount() {
+                return tabDrawerData.getTabWithDrawerCount();
+            }
+
+            @Override
+            public Object instantiateItem(ViewGroup container, int position) {
+                View view = prepareItemListContainerView(position);
+                container.addView(view);
+                return view;
+            }
+
+            @Override
+            public void destroyItem(ViewGroup container, int position, Object object) {
+                container.removeView((View) object);
+            }
+
+            @Override
+            public boolean isViewFromObject(View view, Object object) {
+                return view.equals(object);
+            }
+        });
+
+        drawerViewPager.setCurrentItem(currentSelectedTabPos);
+
+        tabListContainer.addView(drawerViewPager);
         tabDrawerLayout.addView(tabListContainer);
     }
 
@@ -360,6 +396,10 @@ public class TabDrawer implements View.OnClickListener, GridView.OnItemClickList
             gridView.setNumColumns(tab.getDrawerListColumnNumber());
         }
 
+
+        if (tabPos == currentSelectedTabPos) {
+            tab.getTabItemList().get(currentSelectedTabItemPos).setSelected(true);
+        }
         gridView.setAdapter(setDrawerListAdapter(tabPos));
 
         container.requestLayout();
@@ -369,7 +409,7 @@ public class TabDrawer implements View.OnClickListener, GridView.OnItemClickList
     /**
      * Custom Array Adapter
      *
-     * @param tabPos Tab Psition
+     * @param tabPos Tab Position
      * @return ArrayAdapter
      */
     private ArrayAdapter<TabListItem> setDrawerListAdapter(final int tabPos) {
@@ -466,11 +506,6 @@ public class TabDrawer implements View.OnClickListener, GridView.OnItemClickList
             RelativeLayout tabLayout = (RelativeLayout) tabContainer.getChildAt(i);
             ImageView iconView = null;
             TextView titleView = null;
-            RelativeLayout drawerLayout = null;
-
-            if (tabDrawerData.hasDrawerForList()) {
-                drawerLayout = (RelativeLayout) tabListContainer.getChildAt(tabPos);
-            }
 
             if (tab.getIconImage() != 0) {
                 iconView = (ImageView) tabLayout.findViewById(1100 + i);
@@ -481,7 +516,7 @@ public class TabDrawer implements View.OnClickListener, GridView.OnItemClickList
             }
 
             if (i == tabPos) {
-                setSelectedTabView(tabLayout, iconView, titleView, drawerLayout, i);
+                setSelectedTabView(tabLayout, iconView, titleView, i);
 
                 if (iconView != null) { iconView.requestLayout(); }
                 if (titleView != null) { titleView.requestLayout(); }
@@ -623,6 +658,7 @@ public class TabDrawer implements View.OnClickListener, GridView.OnItemClickList
      */
     private void openDrawer() {
         drawerOpen = true;
+
         if (tabBarPositionTopOrBottom()) {
             tabDrawerLayout.animate().translationY(0);
         }
@@ -711,7 +747,10 @@ public class TabDrawer implements View.OnClickListener, GridView.OnItemClickList
 
         tempSelectedTabPos = clickedTabPos;
         refreshTabBar(tempSelectedTabPos);
-        updateTabListContainer(tempSelectedTabPos);
+
+        if (drawerViewPager != null) {
+            drawerViewPager.setCurrentItem(tempSelectedTabPos, isDrawerOpen());
+        }
 
         if (!isDrawerOpen()) {
             openDrawer();
@@ -800,7 +839,7 @@ public class TabDrawer implements View.OnClickListener, GridView.OnItemClickList
     }
 
     /**
-     * Sets the views of selected tab/icon/title/drawer.
+     * Sets the views of selected tab/icon/title.
      * <p>
      * If other than color, background color, etc. needed;
      * by overriding this method, you can modify the views of entire layout.
@@ -809,10 +848,9 @@ public class TabDrawer implements View.OnClickListener, GridView.OnItemClickList
      * @param tabLayout Tab Layout itself; RelativeLayout
      * @param iconView Icon (Image); ImageView
      * @param titleView Title; TextView
-     * @param drawerLayout Drawer layout of the tab; RelativeLayout
      * @param tabPosition Tab Position, to modify the tab you want; int
      */
-    public void setSelectedTabView(RelativeLayout tabLayout, ImageView iconView, TextView titleView, RelativeLayout drawerLayout, int tabPosition) {
+    public void setSelectedTabView(RelativeLayout tabLayout, ImageView iconView, TextView titleView, int tabPosition) {
         Tab tab = tabDrawerData.getTab(tabPosition);
 
         if (!tab.getCustomTabViewSettingsStatus()) {
